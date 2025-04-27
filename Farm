@@ -1,165 +1,132 @@
+-- Full Final Anti-AFK + GUI + Auto Rejoin + Auto Execute
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
 local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local Player = Players.LocalPlayer
 
 -- Settings
 local Settings = {
     AntiAFKEnabled = true,
-    AutoTeleportEnabled = false,  -- Setting for Auto Teleport
-    AutoRejoinEnabled = true      -- Setting for Auto Rejoin
+    AutoRejoinEnabled = true,
+    AutoExecuteEnabled = false
 }
 
--- Target position for auto teleport
-local targetPosition = Vector3.new(4925.61, 29.73, -2150.91)
+-- Create GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AntiAFKGui"
+ScreenGui.Parent = game.CoreGui
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn = false
 
--- Function to save settings
-local function saveSettings()
-    local settings = {
-        AntiAFKEnabled = Settings.AntiAFKEnabled,
-        AutoTeleportEnabled = Settings.AutoTeleportEnabled,
-        AutoRejoinEnabled = Settings.AutoRejoinEnabled
-    }
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 250, 0, 210)
+Frame.Position = UDim2.new(0.5, -125, 0.5, -100)
+Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Frame.BorderSizePixel = 0
+Frame.Parent = ScreenGui
+Frame.Active = true
+Frame.Draggable = true
 
-    local playerData = game:GetService("DataStoreService"):GetDataStore("PlayerSettings")
-    pcall(function()
-        playerData:SetAsync(Player.UserId, settings)
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.BackgroundTransparency = 1
+Title.Text = "Anti-AFK Settings"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 24
+Title.Parent = Frame
+
+-- Create Toggle Function
+local function createToggle(name, position, default, callback)
+    local Toggle = Instance.new("TextButton")
+    Toggle.Size = UDim2.new(0, 220, 0, 40)
+    Toggle.Position = position
+    Toggle.BackgroundColor3 = default and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
+    Toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Toggle.Text = name .. ": " .. (default and "ON" or "OFF")
+    Toggle.Font = Enum.Font.SourceSans
+    Toggle.TextSize = 20
+    Toggle.Parent = Frame
+
+    local toggled = default
+    Toggle.MouseButton1Click:Connect(function()
+        toggled = not toggled
+        Toggle.Text = name .. ": " .. (toggled and "ON" or "OFF")
+        Toggle.BackgroundColor3 = toggled and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
+        callback(toggled)
     end)
 end
 
--- Function to load settings
-local function loadSettings()
-    local playerData = game:GetService("DataStoreService"):GetDataStore("PlayerSettings")
-    local data
-    pcall(function()
-        data = playerData:GetAsync(Player.UserId)
-    end)
+-- Toggles
+createToggle("Anti-AFK Enabled", UDim2.new(0, 15, 0, 50), true, function(value)
+    Settings.AntiAFKEnabled = value
+end)
 
-    if data then
-        Settings.AntiAFKEnabled = data.AntiAFKEnabled
-        Settings.AutoTeleportEnabled = data.AutoTeleportEnabled
-        Settings.AutoRejoinEnabled = data.AutoRejoinEnabled
-    end
-end
+createToggle("Auto Rejoin Enabled", UDim2.new(0, 15, 0, 100), true, function(value)
+    Settings.AutoRejoinEnabled = value
+end)
 
--- Load settings when the player joins
-loadSettings()
+createToggle("Auto Execute after Rejoin", UDim2.new(0, 15, 0, 150), false, function(value)
+    Settings.AutoExecuteEnabled = value
+end)
 
 -- Anti AFK Logic
-local function enableAntiAFK()
-    Player.Idled:Connect(function()
-        if Settings.AntiAFKEnabled then
-            VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-            task.wait(1)
-            VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-        end
-    end)
+Player.Idled:Connect(function()
+    if Settings.AntiAFKEnabled then
+        VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end
+end)
 
-    -- Jump every 5 minutes
-    task.spawn(function()
-        while task.wait(5 * 60) do -- 5 minutes
-            if Settings.AntiAFKEnabled then
-                local humanoid = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                end
+-- Jump every 5 minutes
+task.spawn(function()
+    while task.wait(5 * 60) do -- every 5 minutes
+        if Settings.AntiAFKEnabled then
+            local humanoid = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
             end
         end
-    end)
-end
-
-local function disableAntiAFK()
-    -- Disable Anti-AFK logic
-    Player.Idled:Disconnect()
-end
-
--- Auto Teleport to Target Position
-local function autoTeleport()
-    if Settings.AutoTeleportEnabled then
-        local success, result = pcall(function()
-            -- Teleport to the exact position
-            Player.Character:SetPrimaryPartCFrame(CFrame.new(targetPosition))
-        end)
-        if success then
-            print("[AutoTeleport] Teleport to position success")
-        else
-            warn("[AutoTeleport] Teleport to position failed:", result)
-        end
     end
-end
+end)
 
--- Auto Rejoin the Game
-local function autoRejoin()
+-- Auto Rejoin on Disconnect
+local function rejoin()
+    task.wait(3) -- wait 3 seconds for smoother rejoin
     if Settings.AutoRejoinEnabled then
-        local success, result = pcall(function()
-            -- Teleport to another server of the same game
-            TeleportService:Teleport(game.PlaceId, Player)
-        end)
-        if success then
-            print("[AutoRejoin] Teleport success")
-        else
-            warn("[AutoRejoin] Teleport failed:", result)
-        end
+        TeleportService:Teleport(game.PlaceId, Player)
     end
 end
 
--- Listen for Teleport failures and auto-rejoin if enabled
 Player.OnTeleport:Connect(function(state)
     if state == Enum.TeleportState.Failed then
-        autoRejoin()
+        rejoin()
     end
 end)
 
--- Library for Toggle UI
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/bloodball/-back-ups-for-libs/main/wizard"))()
+game:GetService("Players").PlayerRemoving:Connect(function(leavingPlayer)
+    if leavingPlayer == Player then
+        rejoin()
+    end
+end)
 
-local Window = Library:NewWindow("Anti System")
-
-local Tab = Window:NewSection("Main")
-
-Tab:CreateToggle("Anti-AFK Enabled", function(value)
-    Settings.AntiAFKEnabled = value
-    saveSettings()  -- Save settings after a toggle change
-    print("Anti-AFK Enabled set to:", value)
-
-    -- Toggle Anti-AFK logic based on the setting
-    if Settings.AntiAFKEnabled then
-        enableAntiAFK()
+-- Auto Execute after Rejoin
+if Settings.AutoExecuteEnabled then
+    local autoExecScript = [[
+        -- Auto-executed Anti-AFK on Rejoin
+        loadstring(game:HttpGet("PASTE YOUR SCRIPT LINK HERE"))()
+    ]]
+    if not isfile then
+        warn("[AutoExecute] Filesystem not available, can't auto-execute.")
     else
-        disableAntiAFK()
+        if not isfile("AutoAFK_Rejoin.lua") then
+            writefile("AutoAFK_Rejoin.lua", autoExecScript)
+        end
+        loadfile("AutoAFK_Rejoin.lua")()
     end
-end)
-
-Tab:CreateToggle("Auto Teleport to Position", function(value)
-    Settings.AutoTeleportEnabled = value
-    saveSettings()  -- Save settings after a toggle change
-    print("Auto Teleport Enabled set to:", value)
-
-    -- Teleport if auto teleport is enabled
-    autoTeleport()
-end)
-
-Tab:CreateToggle("Auto Rejoin Enabled", function(value)
-    Settings.AutoRejoinEnabled = value
-    saveSettings()  -- Save settings after a toggle change
-    print("Auto Rejoin Enabled set to:", value)
-
-    -- Attempt to rejoin if auto rejoin is enabled
-    if Settings.AutoRejoinEnabled then
-        autoRejoin()
-    end
-end)
-
--- Start Anti-AFK logic based on the saved settings
-if Settings.AntiAFKEnabled then
-    enableAntiAFK()
 end
 
--- Auto Rejoin handling when disconnected
-game:GetService("Players").PlayerRemoving:Connect(function(leavingPlayer)
-    if leavingPlayer == Player and Settings.AutoRejoinEnabled then
-        autoRejoin()
-    end
-end)
-
-print("[Auto Rejoin] Script loaded successfully.")
+print("[Anti-AFK System] Loaded and Ready.")
